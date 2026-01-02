@@ -30,7 +30,7 @@ COMPONENTS = [
 # ------------------ Reset keys ------------------
 RESET_KEYS = [
     "date_field", "member_field", "component_field",
-    "tickets_field", "pages_field",          # using pages now
+    "tickets_field", "pages_field",
     "hours_field", "minutes_field", "comments_field"
 ]
 
@@ -40,10 +40,7 @@ if st.session_state.get("do_reset"):
     st.session_state["do_reset"] = False
 
 # ------------------ Public holidays ------------------
-PUBLIC_HOLIDAYS = {
-    date(2024, 12, 25),
-    date(2025, 1, 1),
-}
+PUBLIC_HOLIDAYS = {date(2024, 12, 25), date(2025, 1, 1)}
 
 # ------------------ Shared helpers ------------------
 def end_of_month(y: int, m: int) -> date:
@@ -60,7 +57,7 @@ def build_period_options_and_months(df_dates: pd.Series):
     """
     Build period options:
       - Always include 'Current Week', 'Previous Week', 'Current Month', 'Previous Month'
-      - Include months present in the data (kept rule: months >= Nov 2024)
+      - Include months present in the data (>= Nov 2024 as per your rule)
       - Exclude the computed 'Previous Month' from explicit month labels to avoid duplication
     """
     today = date.today()
@@ -68,16 +65,13 @@ def build_period_options_and_months(df_dates: pd.Series):
     current_month = today.month
     current_year = today.year
 
-    # Convert to monthly periods based on available data
     year_month = pd.to_datetime(df_dates, errors="coerce").dt.to_period("M")
 
-    # Only months present in data; keep >= Nov 2024 rule if desired
     months_union = sorted([
         m for m in year_month.unique()
         if (m.year > 2024 or (m.year == 2024 and m.month >= 11))
     ])
 
-    # Work out previous month and exclude it from labels to avoid duplication
     prev_month = current_month - 1 if current_month > 1 else 12
     prev_year = current_year if current_month > 1 else current_year - 1
     previous_month_period = pd.Period(f"{prev_year}-{prev_month:02d}")
@@ -159,7 +153,7 @@ with tab1:
                 "member": member,
                 "component": component,
                 "tickets": int(tickets),
-                "pages": int(pages),              # store pages
+                "pages": int(pages),
                 "duration": duration_minutes,
                 "comments": (comments or "").strip() or None
             }
@@ -176,7 +170,7 @@ with tab1:
         else:
             st.warning("Please select a member and component, and pick a date before submitting.")
 
-    # Fetch and filter by team; remove unwanted columns in display
+    # Fetch and filter by team; show comments at the end
     try:
         response = supabase.table("ecom").select("*").order("date", desc=True).execute()
         df1 = pd.DataFrame(response.data)
@@ -186,14 +180,19 @@ with tab1:
 
     if not df1.empty:
         df1["date"] = pd.to_datetime(df1["date"], errors="coerce")
-        df1 = df1[df1["team"] == TEAM]  # Show only entries for TEAM
+        df1 = df1[df1["team"] == TEAM]
 
-        # Drop unwanted columns: id, sku, codes, banners (KEEP pages)
+        # Drop unwanted columns (keep 'pages', 'comments')
         drop_cols = [col for col in ["id", "sku", "codes", "banners"] if col in df1.columns]
         df1 = df1.drop(columns=drop_cols)
 
+        # Ensure 'comments' is the last column
+        if "comments" in df1.columns:
+            ordered = [c for c in df1.columns if c != "comments"] + ["comments"]
+            df1 = df1[ordered]
+
         st.subheader(f"Latest entries for {TEAM} (sorted by Date descending)")
-        st.dataframe(df1, use_container_width=True)  # dataframe still supports this for now
+        st.dataframe(df1, use_container_width=True)
     else:
         st.info("No data available")
 
@@ -272,8 +271,8 @@ with tab2:
                                         x_type="N", y_type="Q", x_title="Member", y_title="Pages")
                 st.altair_chart(chart, width='stretch')
 
-            # --- NEW: By Component (Tickets & Pages together) ---
-            st.subheader("By Component (Tickets & Pages)")
+            # --- Updated title and grouped bars: Tickets & Pages together ---
+            st.subheader("By Component (Sum of Tickets and Pages)")
 
             comp_sum = filtered.groupby("component")[["tickets", "pages"]].sum().reset_index()
             # Replace blank/NaN component with "Unspecified"
