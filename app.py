@@ -13,9 +13,9 @@ SUPABASE_URL = "https://vupalstqgfzwxwlvengp.supabase.co"   # TODO: replace
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGFsc3RxZ2Z6d3h3bHZlbmdwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcwMTI0MjIsImV4cCI6MjA4MjU4ODQyMn0.tQsnAFYleVlRldH_nYW3QGhMvEQaYVH0yXNpkJqtkBY"  # TODO: replace
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-TEAM = "Ecom"
+TEAM = "E-Commerce Operations"
 MEMBERS = ["Nagalingam"]
-COMPONENTS = ["-- Select --","New Article Page Creation","Page Updates","BAU Promo Planner","New Page Creation","Innovation","Meeting","Others","Leave",
+COMPONENTS = ["-- Select --","New Article Page Creation","Page Updates","BAU Promo Planner","New Page Creation","Innovation","Meeting","Others",
               "Leave"]
 
 # ------------------ Reset keys ------------------
@@ -100,14 +100,14 @@ def compute_weekdays_for_choice(choice, filtered_months, month_labels,
 
 # ------------------ Tabs ------------------
 tab1, tab2, tab3 = st.tabs([
-    "📝 Ecom",
+    "📝 E-Commerce Operations",
     "📊 Visuals",
     "📈 Utilization & Occupancy"
 ])
 
 # ------------------ TAB 1 ------------------
 with tab1:
-    st.title("Ecom")
+    st.title("E-Commerce Operations")
     st.text_input("Team", TEAM, disabled=True)
 
     with st.form(key="entry_form", clear_on_submit=False):
