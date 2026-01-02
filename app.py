@@ -15,13 +15,22 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 TEAM = "E-Commerce Operations"
 MEMBERS = ["Nagalingam"]
-COMPONENTS = ["-- Select --","New Article Page Creation","Page Updates","BAU Promo Planner","New Page Creation","Innovation","Meeting","Others",
-              "Leave"]
+COMPONENTS = [
+    "-- Select --",
+    "New Article Page Creation",
+    "Page Updates",
+    "BAU Promo Planner",
+    "New Page Creation",
+    "Innovation",
+    "Meeting",
+    "Others",
+    "Leave"
+]
 
 # ------------------ Reset keys ------------------
 RESET_KEYS = [
     "date_field", "member_field", "component_field",
-    "tickets_field", "banners_field",        # <-- added banners field here
+    "tickets_field", "pages_field",          # <-- replaced banners_field with pages_field
     "hours_field", "minutes_field", "comments_field"
 ]
 
@@ -59,13 +68,16 @@ def build_period_options_and_months(df_dates: pd.Series):
     current_month = today.month
     current_year = today.year
 
+    # Convert to monthly periods based on available data
     year_month = pd.to_datetime(df_dates, errors="coerce").dt.to_period("M")
 
+    # Only months present in data; keep >= Nov 2024 rule if desired
     months_union = sorted([
         m for m in year_month.unique()
         if (m.year > 2024 or (m.year == 2024 and m.month >= 11))
     ])
 
+    # Work out previous month and exclude it from labels to avoid duplication
     prev_month = current_month - 1 if current_month > 1 else 12
     prev_year = current_year if current_month > 1 else current_year - 1
     previous_month_period = pd.Period(f"{prev_year}-{prev_month:02d}")
@@ -118,9 +130,12 @@ with tab1:
         with c2:
             component = st.selectbox("Component", COMPONENTS, key="component_field")
 
-        # Tickets & Banners (frontend: keep banners; exclude sku, pages, codes)
-        tickets = st.number_input("Tickets", min_value=0, step=1, key="tickets_field")
-        banners = st.number_input("Banners", min_value=0, step=1, key="banners_field")
+        # Tickets & Pages (same datatype) - single row
+        m1, m2 = st.columns(2)
+        with m1:
+            tickets = st.number_input("Tickets", min_value=0, step=1, key="tickets_field")
+        with m2:
+            pages = st.number_input("Pages", min_value=0, step=1, key="pages_field")
 
         # Hours & Minutes
         c3, c4 = st.columns(2)
@@ -144,8 +159,7 @@ with tab1:
                 "member": member,
                 "component": component,
                 "tickets": int(tickets),
-                "banners": int(banners),          # <-- store banners
-                # Not inserting sku/pages/codes as per requirement
+                "pages": int(pages),              # <-- store pages (int8/bigint)
                 "duration": duration_minutes,
                 "comments": (comments or "").strip() or None
             }
@@ -174,12 +188,14 @@ with tab1:
         df1["date"] = pd.to_datetime(df1["date"], errors="coerce")
         df1 = df1[df1["team"] == TEAM]  # Show only entries for TEAM
 
-        # Drop unwanted columns: id, sku, pages, codes (KEEP banners)
-        drop_cols = [col for col in ["id", "sku", "pages", "codes"] if col in df1.columns]
+        # Drop unwanted columns: id, sku, codes, banners (KEEP pages)
+        drop_cols = [col for col in ["id", "sku", "codes", "banners"] if col in df1.columns]
         df1 = df1.drop(columns=drop_cols)
 
         st.subheader(f"Latest entries for {TEAM} (sorted by Date descending)")
         st.dataframe(df1, use_container_width=True)
+    else:
+        st.info("No data available")
 
 # ------------------ TAB 2 ------------------
 with tab2:
@@ -204,8 +220,16 @@ with tab2:
         if filtered.empty:
             st.info("No visuals for selected period.")
         else:
-            week_grouped = filtered.groupby("week")[["tickets"]].sum().reset_index().sort_values("week")
-            member_grouped = filtered.groupby("member")[["tickets"]].sum().reset_index()
+            # --- Tickets charts ---
+            week_grouped_tickets = filtered.groupby("week")[["tickets"]].sum().reset_index().sort_values("week")
+            member_grouped_tickets = filtered.groupby("member")[["tickets"]].sum().reset_index()
+
+            # --- Pages charts ---
+            # Ensure 'pages' missing values don't break groupby sum
+            if "pages" not in filtered.columns:
+                filtered["pages"] = 0
+            week_grouped_pages = filtered.groupby("week")[["pages"]].sum().reset_index().sort_values("week")
+            member_grouped_pages = filtered.groupby("member")[["pages"]].sum().reset_index()
 
             def bar_with_labels(df, x_field, y_field, color, x_type="N", y_type="Q", x_title="", y_title=""):
                 bar = alt.Chart(df).mark_bar(color=color).encode(
@@ -219,41 +243,80 @@ with tab2:
                 )
                 return bar + text
 
+            # Row 1: Tickets vs Pages by week
             r1c1, r1c2 = st.columns(2)
             with r1c1:
                 st.subheader("Tickets by week")
-                chart = bar_with_labels(week_grouped, "week", "tickets", "steelblue",
+                chart = bar_with_labels(week_grouped_tickets, "week", "tickets", "steelblue",
                                         x_type="O", y_type="Q", x_title="Week", y_title="Tickets")
                 st.altair_chart(chart, use_container_width=True)
             with r1c2:
-                st.subheader("Tickets by member")
-                chart = bar_with_labels(member_grouped, "member", "tickets", "steelblue",
-                                        x_type="N", y_type="Q", x_title="Member", y_title="Tickets")
+                st.subheader("Pages by week")
+                chart = bar_with_labels(week_grouped_pages, "week", "pages", "seagreen",
+                                        x_type="O", y_type="Q", x_title="Week", y_title="Pages")
                 st.altair_chart(chart, use_container_width=True)
 
-            st.subheader("By Component (Sum of Tickets)")
-            component_grouped = filtered.groupby("component")[["tickets"]].sum().reset_index()
-            component_grouped["component"] = component_grouped["component"].fillna("Unspecified")
-            component_grouped.loc[component_grouped["component"].eq(""), "component"] = "Unspecified"
-            component_grouped = component_grouped.sort_values("tickets", ascending=False)
+            # Row 2: Tickets vs Pages by member
+            r2c1, r2c2 = st.columns(2)
+            with r2c1:
+                st.subheader("Tickets by member")
+                chart = bar_with_labels(member_grouped_tickets, "member", "tickets", "steelblue",
+                                        x_type="N", y_type="Q", x_title="Member", y_title="Tickets")
+                st.altair_chart(chart, use_container_width=True)
+            with r2c2:
+                st.subheader("Pages by member")
+                chart = bar_with_labels(member_grouped_pages, "member", "pages", "seagreen",
+                                        x_type="N", y_type="Q", x_title="Member", y_title="Pages")
+                st.altair_chart(chart, use_container_width=True)
 
-            bar = alt.Chart(component_grouped).mark_bar(color="#4C78A8").encode(
+            # Components: Tickets and Pages
+            st.subheader("By Component (Sum of Tickets)")
+            component_grouped_tickets = filtered.groupby("component")[["tickets"]].sum().reset_index()
+            component_grouped_tickets["component"] = component_grouped_tickets["component"].fillna("Unspecified")
+            component_grouped_tickets.loc[component_grouped_tickets["component"].eq(""), "component"] = "Unspecified"
+            component_grouped_tickets = component_grouped_tickets.sort_values("tickets", ascending=False)
+
+            bar_t = alt.Chart(component_grouped_tickets).mark_bar(color="#4C78A8").encode(
                 x=alt.X("component:N", title="Component",
                         sort=alt.SortField(field="tickets", order="descending")),
                 y=alt.Y("tickets:Q", title="Tickets")
             ).properties(height=400)
-            text = alt.Chart(component_grouped).mark_text(align="center", baseline="bottom", dy=-5, color="black").encode(
+            text_t = alt.Chart(component_grouped_tickets).mark_text(align="center", baseline="bottom", dy=-5, color="black").encode(
                 x=alt.X("component:N", sort=alt.SortField(field="tickets", order="descending")),
                 y=alt.Y("tickets:Q"),
                 text=alt.Text("tickets:Q")
             )
-            chart = (bar + text).encode(
+            chart_t = (bar_t + text_t).encode(
                 tooltip=[
                     alt.Tooltip("component:N", title="Component"),
                     alt.Tooltip("tickets:Q", title="Tickets"),
                 ]
             )
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart_t, use_container_width=True)
+
+            st.subheader("By Component (Sum of Pages)")
+            component_grouped_pages = filtered.groupby("component")[["pages"]].sum().reset_index()
+            component_grouped_pages["component"] = component_grouped_pages["component"].fillna("Unspecified")
+            component_grouped_pages.loc[component_grouped_pages["component"].eq(""), "component"] = "Unspecified"
+            component_grouped_pages = component_grouped_pages.sort_values("pages", ascending=False)
+
+            bar_p = alt.Chart(component_grouped_pages).mark_bar(color="#2E8B57").encode(
+                x=alt.X("component:N", title="Component",
+                        sort=alt.SortField(field="pages", order="descending")),
+                y=alt.Y("pages:Q", title="Pages")
+            ).properties(height=400)
+            text_p = alt.Chart(component_grouped_pages).mark_text(align="center", baseline="bottom", dy=-5, color="black").encode(
+                x=alt.X("component:N", sort=alt.SortField(field="pages", order="descending")),
+                y=alt.Y("pages:Q"),
+                text=alt.Text("pages:Q")
+            )
+            chart_p = (bar_p + text_p).encode(
+                tooltip=[
+                    alt.Tooltip("component:N", title="Component"),
+                    alt.Tooltip("pages:Q", title="Pages"),
+                ]
+            )
+            st.altair_chart(chart_p, use_container_width=True)
 
 # ------------------ TAB 3 ------------------
 with tab3:
