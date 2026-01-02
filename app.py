@@ -271,54 +271,39 @@ with tab2:
                                         x_type="N", y_type="Q", x_title="Member", y_title="Pages")
                 st.altair_chart(chart, width='stretch')
 
-            # --- Updated title and grouped bars: Tickets & Pages together ---
+            # --- Single-bar per component: Sum(Tickets + Pages) ---
             st.subheader("By Component (Sum of Tickets and Pages)")
 
             comp_sum = filtered.groupby("component")[["tickets", "pages"]].sum().reset_index()
-            # Replace blank/NaN component with "Unspecified"
             comp_sum["component"] = comp_sum["component"].fillna("Unspecified")
             comp_sum.loc[comp_sum["component"].eq(""), "component"] = "Unspecified"
 
-            # Order components by total activity (tickets + pages)
+            # Compute total = tickets + pages (single bar)
             comp_sum["total"] = comp_sum["tickets"] + comp_sum["pages"]
             comp_sum = comp_sum.sort_values("total", ascending=False)
 
-            # Melt for grouped bars: one row per component per metric
-            comp_long = comp_sum.melt(
-                id_vars=["component"],
-                value_vars=["tickets", "pages"],
-                var_name="metric",
-                value_name="value"
-            )
-
-            # Grouped bar chart using xOffset for side-by-side bars in a single plot
-            grouped = alt.Chart(comp_long).mark_bar().encode(
+            bar = alt.Chart(comp_sum).mark_bar(color="#6C5CE7").encode(
                 x=alt.X("component:N", title="Component", sort=comp_sum["component"].tolist()),
-                xOffset=alt.XOffset("metric:N"),
-                y=alt.Y("value:Q", title="Count"),
-                color=alt.Color("metric:N", title="Metric",
-                                scale=alt.Scale(domain=["tickets", "pages"],
-                                                range=["#4C78A8", "#2E8B57"])),
-                tooltip=[
-                    alt.Tooltip("component:N", title="Component"),
-                    alt.Tooltip("metric:N", title="Metric"),
-                    alt.Tooltip("value:Q", title="Count")
-                ]
+                y=alt.Y("total:Q", title="Sum of Tickets and Pages")
             ).properties(height=400)
 
-            # Labels above each grouped bar
-            labels = alt.Chart(comp_long).mark_text(
+            labels = alt.Chart(comp_sum).mark_text(
                 align="center", baseline="bottom", dy=-5, color="black"
             ).encode(
                 x=alt.X("component:N", sort=comp_sum["component"].tolist()),
-                xOffset=alt.XOffset("metric:N"),
-                y=alt.Y("value:Q"),
-                text=alt.Text("value:Q"),
-                color=alt.Color("metric:N", legend=None)
+                y=alt.Y("total:Q"),
+                text=alt.Text("total:Q")
             )
 
-            chart_comp = grouped + labels
-            st.altair_chart(chart_comp, width='stretch')
+            chart_comp_total = (bar + labels).encode(
+                tooltip=[
+                    alt.Tooltip("component:N", title="Component"),
+                    alt.Tooltip("tickets:Q", title="Tickets"),
+                    alt.Tooltip("pages:Q", title="Pages"),
+                    alt.Tooltip("total:Q", title="Total")
+                ]
+            )
+            st.altair_chart(chart_comp_total, width='stretch')
 
 # ------------------ TAB 3 ------------------
 with tab3:
