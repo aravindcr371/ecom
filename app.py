@@ -30,7 +30,7 @@ COMPONENTS = [
 # ------------------ Reset keys ------------------
 RESET_KEYS = [
     "date_field", "member_field", "component_field",
-    "tickets_field", "pages_field",          # <-- replaced banners_field with pages_field
+    "tickets_field", "pages_field",          # using pages now
     "hours_field", "minutes_field", "comments_field"
 ]
 
@@ -159,7 +159,7 @@ with tab1:
                 "member": member,
                 "component": component,
                 "tickets": int(tickets),
-                "pages": int(pages),              # <-- store pages (int8/bigint)
+                "pages": int(pages),              # store pages
                 "duration": duration_minutes,
                 "comments": (comments or "").strip() or None
             }
@@ -211,6 +211,12 @@ with tab2:
         st.info("No data available")
     else:
         vdf["date"] = pd.to_datetime(vdf["date"], errors="coerce")
+
+        # Ensure pages column exists for charts (default to 0 if missing/null)
+        if "pages" not in vdf.columns:
+            vdf["pages"] = 0
+        vdf["pages"] = vdf["pages"].fillna(0)
+
         options, filtered_months, month_labels, previous_month_period, today, current_weekday, current_month, current_year = build_period_options_and_months(vdf["date"])
         choice = st.selectbox("Select period", options, key="tab2_period")
         weekdays = compute_weekdays_for_choice(choice, filtered_months, month_labels, previous_month_period,
@@ -225,9 +231,6 @@ with tab2:
             member_grouped_tickets = filtered.groupby("member")[["tickets"]].sum().reset_index()
 
             # --- Pages charts ---
-            # Ensure 'pages' missing values don't break groupby sum
-            if "pages" not in filtered.columns:
-                filtered["pages"] = 0
             week_grouped_pages = filtered.groupby("week")[["pages"]].sum().reset_index().sort_values("week")
             member_grouped_pages = filtered.groupby("member")[["pages"]].sum().reset_index()
 
@@ -269,54 +272,64 @@ with tab2:
                                         x_type="N", y_type="Q", x_title="Member", y_title="Pages")
                 st.altair_chart(chart, use_container_width=True)
 
-            # Components: Tickets and Pages
-            st.subheader("By Component (Sum of Tickets)")
-            component_grouped_tickets = filtered.groupby("component")[["tickets"]].sum().reset_index()
-            component_grouped_tickets["component"] = component_grouped_tickets["component"].fillna("Unspecified")
-            component_grouped_tickets.loc[component_grouped_tickets["component"].eq(""), "component"] = "Unspecified"
-            component_grouped_tickets = component_grouped_tickets.sort_values("tickets", ascending=False)
+            # --- NEW: By Component (Tickets & Pages together) ---
+            st.subheader("By Component (Tickets & Pages)")
 
-            bar_t = alt.Chart(component_grouped_tickets).mark_bar(color="#4C78A8").encode(
+            comp_sum = filtered.groupby("component")[["tickets", "pages"]].sum().reset_index()
+            # Replace blank/NaN component with "Unspecified"
+            comp_sum["component"] = comp_sum["component"].fillna("Unspecified")
+            comp_sum.loc[comp_sum["component"].eq(""), "component"] = "Unspecified"
+
+            # Order components by total activity (tickets + pages)
+            comp_sum["total"] = comp_sum["tickets"] + comp_sum["pages"]
+            comp_sum = comp_sum.sort_values("total", ascending=False)
+
+            # Melt for grouped bars: one row per component per metric
+            comp_long = comp_sum.melt(
+                id_vars=["component"],
+                value_vars=["tickets", "pages"],
+                var_name="metric",
+                value_name="value"
+            )
+
+            # Build grouped bar chart
+            grouped = alt.Chart(comp_long).mark_bar().encode(
                 x=alt.X("component:N", title="Component",
-                        sort=alt.SortField(field="tickets", order="descending")),
-                y=alt.Y("tickets:Q", title="Tickets")
+                        sort=comp_sum["component"].tolist()),
+                y=alt.Y("value:Q", title="Count"),
+                color=alt.Color("metric:N", title="Metric",
+                                scale=alt.Scale(domain=["tickets", "pages"],
+                                                range=["#4C78A8", "#2E8B57"])),
+                column=alt.Column("metric:N", title="", header=alt.Header(labelAngle=0))  # Optional facet; comment to keep single plot
             ).properties(height=400)
-            text_t = alt.Chart(component_grouped_tickets).mark_text(align="center", baseline="bottom", dy=-5, color="black").encode(
-                x=alt.X("component:N", sort=alt.SortField(field="tickets", order="descending")),
-                y=alt.Y("tickets:Q"),
-                text=alt.Text("tickets:Q")
-            )
-            chart_t = (bar_t + text_t).encode(
-                tooltip=[
-                    alt.Tooltip("component:N", title="Component"),
-                    alt.Tooltip("tickets:Q", title="Tickets"),
-                ]
-            )
-            st.altair_chart(chart_t, use_container_width=True)
 
-            st.subheader("By Component (Sum of Pages)")
-            component_grouped_pages = filtered.groupby("component")[["pages"]].sum().reset_index()
-            component_grouped_pages["component"] = component_grouped_pages["component"].fillna("Unspecified")
-            component_grouped_pages.loc[component_grouped_pages["component"].eq(""), "component"] = "Unspecified"
-            component_grouped_pages = component_grouped_pages.sort_values("pages", ascending=False)
+            # Alternative single-plot grouped bars (uncomment this and comment the faceted chart above if you prefer side-by-side bars in one plot):
+            # grouped = alt.Chart(comp_long).mark_bar().encode(
+            #     x=alt.X("component:N", title="Component",
+            #             sort=comp_sum["component"].tolist()),
+            #     y=alt.Y("value:Q", title="Count"),
+            #     color=alt.Color("metric:N", title="Metric",
+            #                     scale=alt.Scale(domain=["tickets", "pages"],
+            #                                     range=["#4C78A8", "#2E8B57"])),
+            #     tooltip=[
+            #         alt.Tooltip("component:N", title="Component"),
+            #         alt.Tooltip("metric:N", title="Metric"),
+            #         alt.Tooltip("value:Q", title="Count")
+            #     ]
+            # ).properties(height=400)
 
-            bar_p = alt.Chart(component_grouped_pages).mark_bar(color="#2E8B57").encode(
-                x=alt.X("component:N", title="Component",
-                        sort=alt.SortField(field="pages", order="descending")),
-                y=alt.Y("pages:Q", title="Pages")
-            ).properties(height=400)
-            text_p = alt.Chart(component_grouped_pages).mark_text(align="center", baseline="bottom", dy=-5, color="black").encode(
-                x=alt.X("component:N", sort=alt.SortField(field="pages", order="descending")),
-                y=alt.Y("pages:Q"),
-                text=alt.Text("pages:Q")
+            # Add labels on top of bars (works best with facet; for single-plot grouped, label placement can overlap)
+            labels = alt.Chart(comp_long).mark_text(
+                align="center", baseline="bottom", dy=-5, color="black"
+            ).encode(
+                x=alt.X("component:N", sort=comp_sum["component"].tolist()),
+                y=alt.Y("value:Q"),
+                text=alt.Text("value:Q"),
+                color=alt.Color("metric:N", legend=None)
             )
-            chart_p = (bar_p + text_p).encode(
-                tooltip=[
-                    alt.Tooltip("component:N", title="Component"),
-                    alt.Tooltip("pages:Q", title="Pages"),
-                ]
-            )
-            st.altair_chart(chart_p, use_container_width=True)
+
+            chart_comp = (grouped + labels).resolve_scale(y='shared')
+            st.altair_chart(chart_comp, use_container_width=True)
 
 # ------------------ TAB 3 ------------------
 with tab3:
